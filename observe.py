@@ -21,11 +21,11 @@ FAILED_UPLOADS_PATH = "failed_uploads.json"
 RECORDING = False
 RECORD_PROC = None
 CURRENT_SONG = None
-UPLOAD_ERRORS = [] # Global liste for å lagre opplastingsfeil
-UPLOAD_STATUS = {} # Global ordbok for å spore status på opplastinger
+UPLOAD_ERRORS = [] # Global list to store upload errors
+UPLOAD_STATUS = {} # Global dictionary to track upload statuses
 
-retry_lock = threading.Lock() # Lås for å unngå samtidige gjenopplastingsforsøk
-retry_timer = None # Holder på timer-objektet
+retry_lock = threading.Lock() # Lock to prevent concurrent retry attempts
+retry_timer = None # Holds the timer object
 
 snapshot_lock = threading.Lock()
 
@@ -38,13 +38,13 @@ def is_phone_connected():
 
 def update_active_color():
     """
-    Sjekker om dagens dato er annerledes enn den lagrede datoen i colors.json.
-    Hvis den er annerledes, flyttes den aktive fargen til neste i listen
-    og datoen oppdateres.
+    Checks if the current date is different from the stored date in colors.json.
+    If it's different, the active color is moved to the next in the list
+    and the date is updated.
     """
     today_str = time.strftime("%Y-%m-%d")
 
-    # Sjekk om filen eksisterer, hvis ikke, opprett den
+    # Check if the file exists, if not, create it
     if not os.path.exists(COLORS_PATH):
         default_colors = {
             "last_updated": "2000-01-01",
@@ -59,42 +59,42 @@ def update_active_color():
         stored_date_str = data.get("last_updated")
 
         if stored_date_str != today_str:
-            print(f"Dato endret. Roterer aktiv farge.")
+            print(f"Date changed. Rotating active color.")
             current_index = data.get("active_index", 0)
             num_colors = len(data.get("colors", []))
-            # Roter til neste farge, gå til start hvis på slutten
+            # Rotate to the next color, loop to the start if at the end
             data["active_index"] = (current_index + 1) % num_colors
             data["last_updated"] = today_str
-            # Gå tilbake til starten av filen og skriv over
+            # Go back to the start of the file and overwrite
             f.seek(0)
             json.dump(data, f, indent=2)
             f.truncate()
 
 def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
     """
-    Laster opp video og miniatyrbilde til YouTube via Google API.
-    Sletter lokale filer etter vellykket opplasting.
+    Uploads video and thumbnail to YouTube via the Google API.
+    Deletes local files after a successful upload.
     """
-    print(f"Starter YouTube-opplasting for '{title}'...")
-    # Oppdater status for UI
+    print(f"Starting YouTube upload for '{title}'...")
+    # Update status for the UI
     if video_path in UPLOAD_STATUS:
-        UPLOAD_STATUS[video_path]['status'] = 'Laster opp...'
+        UPLOAD_STATUS[video_path]['status'] = 'Uploading...'
 
-    # Bygg en absolutt sti til secrets-filen for å sikre at den alltid blir funnet.
+    # Build an absolute path to the secrets file to ensure it's always found.
     script_dir = os.path.dirname(os.path.abspath(__file__))
     TOKEN_FILE = os.path.join(script_dir, "token.json")
 
-    SCOPES = ["https://www.googleapis.com/auth/youtube"] # Endret for å kunne håndtere spillelister
+    SCOPES = ["https://www.googleapis.com/auth/youtube"] # Changed to handle playlists
     API_SERVICE_NAME = "youtube"
     API_VERSION = "v3"
 
     try:
         if not os.path.exists(TOKEN_FILE):
-            print(f"FEIL: Finner ikke '{TOKEN_FILE}'.")
-            print("Kjør 'python authenticate.py' først for å logge inn.")
+            print(f"ERROR: Could not find '{TOKEN_FILE}'.")
+            print("Run 'python authenticate.py' first to log in.")
             return
 
-        # Last inn lagrede credentials fra token.json
+        # Load stored credentials from token.json
         credentials = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
         youtube = build(API_SERVICE_NAME, API_VERSION, credentials=credentials)
@@ -102,7 +102,7 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
         playlist_title = f"Rehearsal {playlist_date_str}"
         playlist_id = None
 
-        # Søk etter eksisterende spilleliste
+        # Search for existing playlist
         playlists_response = youtube.playlists().list(
             part="snippet",
             mine=True,
@@ -112,12 +112,12 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
         for item in playlists_response.get("items", []):
             if item["snippet"]["title"] == playlist_title:
                 playlist_id = item["id"]
-                print(f"Fant eksisterende spilleliste: '{playlist_title}' (ID: {playlist_id})")
+                print(f"Found existing playlist: '{playlist_title}' (ID: {playlist_id})")
                 break
 
-        # Opprett spilleliste hvis den ikke finnes
+        # Create playlist if it doesn't exist
         if not playlist_id:
-            print(f"Spilleliste '{playlist_title}' ikke funnet. Oppretter ny...")
+            print(f"Playlist '{playlist_title}' not found. Creating new one...")
             playlist_body = {
                 "snippet": {
                     "title": playlist_title,
@@ -131,9 +131,9 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
             )
             playlist_response = playlist_insert_request.execute()
             playlist_id = playlist_response["id"]
-            print(f"Opprettet ny spilleliste: '{playlist_title}' (ID: {playlist_id})")
+            print(f"Created new playlist: '{playlist_title}' (ID: {playlist_id})")
 
-        # Bygg request body
+        # Build request body
         body = {
             "snippet": {
                 "title": title,
@@ -142,11 +142,11 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
                 "categoryId": "10" # 10 = Music
             },
             "status": {
-                "privacyStatus": "private" # Kan endres til "public" eller "unlisted"
+                "privacyStatus": "private" # Can be changed to "public" or "unlisted"
             }
         }
 
-        # Last opp video
+        # Upload video
         media_file = MediaFileUpload(video_path, chunksize=-1, resumable=True)
         insert_request = youtube.videos().insert(
             part=",".join(body.keys()),
@@ -155,9 +155,9 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
         )
 
         response = insert_request.execute()
-        print(f"Video lastet opp. Video ID: {response['id']}")
+        print(f"Video uploaded. Video ID: {response['id']}")
 
-        # Legg videoen til i spillelisten
+        # Add the video to the playlist
         playlist_item_body = {
             "snippet": {
                 "playlistId": playlist_id,
@@ -165,49 +165,48 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
             }
         }
         youtube.playlistItems().insert(part="snippet", body=playlist_item_body).execute()
-        print(f"Video lagt til i spilleliste '{playlist_title}'.")
+        print(f"Video added to playlist '{playlist_title}'.")
 
         try:
-            # Last opp miniatyrbilde
+            # Upload thumbnail
             youtube.thumbnails().set(
                 videoId=response['id'],
                 media_body=MediaFileUpload(thumbnail_path)
             ).execute()
-            print("Miniatyrbilde lastet opp.")
+            print("Thumbnail uploaded.")
         except HttpError as e:
-            # Fang opp den spesifikke feilen for thumbnail-tillatelser
+            # Catch the specific error for thumbnail permissions
             if "custom video thumbnails" in str(e):
-                print("\n--- VIKTIG MELDING ---")
-                print("FEIL: Miniatyrbildet kunne ikke lastes opp. YouTube-kontoen din må verifiseres.")
-                print("Gå til https://www.youtube.com/verify for å aktivere funksjonen.")
-                print("Videoen ble lastet opp, men du må legge til miniatyrbildet manuelt.")
-                print("----------------------\n")
+                print("\n--- IMPORTANT NOTICE ---")
+                print("ERROR: Could not upload thumbnail. Your YouTube account must be verified.")
+                print("Go to https://www.youtube.com/verify to enable this feature.")
+                print("The video was uploaded, but you will need to add the thumbnail manually.")
+                print("------------------------\n")
             else:
-                # Kast andre HttpError-feil videre
+                # Re-throw other HttpError exceptions
                 raise e
 
-        # Oppdater status før sletting
+        # Update status before deletion
         if video_path in UPLOAD_STATUS:
-            UPLOAD_STATUS[video_path]['status'] = 'Ferdig! Sletter fil...'
+            UPLOAD_STATUS[video_path]['status'] = 'Done! Deleting file...'
 
-        # Slett lokale filer
-        print(f"Sletter lokale filer: {video_path}, {thumbnail_path}")
+        # Delete local files
+        print(f"Deleting local files: {video_path}, {thumbnail_path}")
         os.remove(video_path)
         os.remove(thumbnail_path)
-
-        # Fjern fra statuslisten etter en kort forsinkelse, slik at brukeren ser "slettet"-meldingen
+        # Remove from the status list after a short delay, so the user can see the "deleted" message
         time.sleep(5)
         UPLOAD_STATUS.pop(video_path, None)
     except Exception as e:
-        error_message = f"Opplasting av '{title}' feilet: {e}"
+        error_message = f"Upload of '{title}' failed: {e}"
         print(error_message)
-        # Legg til feilmeldingen i den globale listen for visning i UI
+        # Add the error message to the global list for UI display
         UPLOAD_ERRORS.append({"title": title, "message": str(e)})
-        # Fjern fra den aktive statuslisten ved feil
+        # Update status in the active list on failure
         if video_path in UPLOAD_STATUS:
-            UPLOAD_STATUS[video_path]['status'] = 'Opplasting feilet. Prøver igjen senere.'
+            UPLOAD_STATUS[video_path]['status'] = 'Upload failed. Retrying later.'
 
-        # Lagre mislykket opplasting for senere forsøk
+        # Save failed upload for a later retry
         with retry_lock:
             try:
                 with open(FAILED_UPLOADS_PATH, 'r') as f:
@@ -215,7 +214,7 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
             except (FileNotFoundError, json.JSONDecodeError):
                 failed = []
 
-            # Unngå duplikater
+            # Avoid duplicates
             if not any(item['video_path'] == video_path for item in failed):
                 failed.append({
                     "video_path": video_path,
@@ -227,135 +226,134 @@ def upload_to_youtube(video_path, thumbnail_path, title, playlist_date_str):
                     json.dump(failed, f, indent=2)
 
 def retry_failed_uploads():
-    """Går gjennom mislykkede opplastinger og prøver å laste dem opp på nytt."""
+    """Goes through failed uploads and tries to upload them again."""
     global retry_timer
-    print("Kjører periodisk sjekk for mislykkede opplastinger...")
+    print("Running periodic check for failed uploads...")
     with retry_lock:
         try:
             with open(FAILED_UPLOADS_PATH, 'r') as f:
                 failed = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            failed = [] # Ingen fil, ingenting å gjøre
+            failed = [] # No file, nothing to do
 
         if not failed:
-            print("Ingen mislykkede opplastinger å prøve på nytt.")
+            print("No failed uploads to retry.")
         else:
-            # Lag en kopi for å iterere over, slik at vi kan endre originalen
+            # Create a copy to iterate over, allowing modification of the original
             remaining_uploads = list(failed)
             for item in list(remaining_uploads):
-                # Sjekk om filene fortsatt eksisterer
+                # Check if the files still exist
                 if not (os.path.exists(item['video_path']) and os.path.exists(item['thumbnail_path'])):
-                    print(f"Filer for '{item['title']}' mangler, fjerner fra gjenopprettingslisten.")
+                    print(f"Files for '{item['title']}' are missing, removing from retry list.")
                     remaining_uploads.remove(item)
                     continue
 
                 try:
-                    print(f"Prøver å laste opp '{item['title']}' på nytt...")
-                    # Kall upload_to_youtube. Den vil fjerne filer og status ved suksess.
+                    print(f"Retrying upload for '{item['title']}'...")
+                    # Call upload_to_youtube. It will handle file and status removal on success.
                     upload_to_youtube(item['video_path'], item['thumbnail_path'], item['title'], item['playlist_date_str'])
-                    # Hvis vi kommer hit uten feil, var opplastingen vellykket.
-                    print(f"Vellykket gjenopplasting av '{item['title']}'.")
+                    # If we get here without an error, the upload was successful
+                    print(f"Successfully re-uploaded '{item['title']}'.")
                     remaining_uploads.remove(item)
                 except Exception as e:
-                    print(f"Gjenopplasting av '{item['title']}' feilet igjen: {e}")
+                    print(f"Retry for '{item['title']}' failed again: {e}")
 
-            # Skriv den oppdaterte listen (kun de som fortsatt feiler) tilbake til filen,
-            # kun hvis det er nødvendig.
+            # Write the updated list (only those that are still failing) back to the file,
+            # but only if necessary.
             if failed != remaining_uploads:
                 with open(FAILED_UPLOADS_PATH, 'w') as f:
                     json.dump(remaining_uploads, f, indent=2)
 
-    # Sett opp neste forsøk om en time
+    # Set up the next retry attempt in one hour
     retry_timer = threading.Timer(3600, retry_failed_uploads)
     retry_timer.start()
 
 def record_video(song):
     global RECORDING, RECORD_PROC, CURRENT_SONG
-    # Vent til snapshot er ferdig
+    # Wait for snapshot to finish
     while snapshot_lock.locked():
         time.sleep(0.1)
 
     RECORDING = True
 
-    # Definer filstier
+    # Define file paths
     safe_name = "".join(c for c in song if c.isalnum() or c in (' ', '_', '-')).rstrip()
     dest_video = f"static/{safe_name}.mp4"
     dest_thumbnail = f"static/{safe_name}.png"
-
-    # Ta opp video direkte til endelig fil
+    # Record video directly to the final file
     cmd = [
         "rpicam-vid",
-        "-t", "0", # Kjør til stoppet manuelt
+        "-t", "0", # Run until stopped manually
         "-o", dest_video,
         "--width", "1280",
         "--height", "720",
         "--framerate", "30",
-        "--mode", "2304:1296", # Velger 2x2 binned mode for full vidvinkel
+        "--mode", "2304:1296", # Selects 2x2 binned mode for full wide angle
         "--codec", "libav",
         "--libav-format", "mp4",
         "--nopreview",
-        "--flush", # Tvinger skriving til disk for hver ramme
-        # --- Parametere for lydopptak ---
-        # IKKE bruk --audio-flagget. Det aktiveres automatisk av parameterne under.
-        "--libav-audio",
-        "--audio-device", "plughw:2",
-        "--audio-codec", "aac",
-        "--audio-source", "alsa", # Forteller libav å fange lyd fra ALSA
-        "--audio-channels", "1" # Legg til eksplisitt antall kanaler (juster til 1 for mono mic)
+        "--flush", # Forces writing to disk for each frame
+        # --- Parameters for audio recording ---
+        # DO NOT use the --audio flag. It's enabled automatically by the parameters below.
         # "--libav-audio",
         # "--audio-device", "plughw:2",
-        # "--audio-device", "plughw:1", # OPPDATERT: Endre '1' til kortnummeret fra 'arecord -l'
         # "--audio-codec", "aac",
-        # "--audio-source", "alsa", # Forteller libav å fange lyd fra ALSA
-        # "--audio-channels", "1" # Legg til eksplisitt antall kanaler (juster til 1 for mono mic)
+        # "--audio-source", "alsa", # Tells libav to capture audio from ALSA
+        # "--audio-channels", "1" # Add explicit channel count (adjust to 1 for mono mic)
+        # "--libav-audio",
+        # "--audio-device", "plughw:2",
+        # "--audio-device", "plughw:1", # UPDATED: Change '1' to the card number from 'arecord -l'
+        # "--audio-codec", "aac",
+        # "--audio-source", "alsa", # Tells libav to capture audio from ALSA
+        # "--audio-channels", "1" # Add explicit channel count (adjust to 1 for mono mic)
     ]
 
     RECORD_PROC = subprocess.Popen(cmd, stderr=subprocess.PIPE, preexec_fn=os.setsid)
-    # Vent på at prosessen skal avsluttes og hent stderr for feilsøking
+    # Wait for the process to finish and get stderr for debugging
     _, err = RECORD_PROC.communicate()
 
-    # Sjekk om opptaket faktisk ble laget
+    # Check if the recording was actually created
     return_code = RECORD_PROC.returncode
     video_exists = os.path.exists(dest_video)
     video_size = os.path.getsize(dest_video) if video_exists else 0
 
-    # Hvis det feilet, skriv ut den faktiske feilmeldingen fra rpicam-vid til loggen
+    # If it failed, print the actual error message from rpicam-vid to the log
     if return_code != 0 and err:
         print("--- rpicam-vid FEILMELDING ---")
         print(err.decode(errors='ignore'))
         print("-----------------------------")
 
-    # Gi filsystemet et øyeblikk til å fullføre skriving etter at prosessen er stoppet.
+    # Give the filesystem a moment to finish writing after the process has been stopped.
     if return_code != 0:
         time.sleep(1)
 
-    # Feilhåndtering: Sjekk om videoen ble laget korrekt
-    # Når vi stopper med SIGINT, er returkoden ofte ikke 0.
-    # Vi anser det som en feil KUN hvis filen ikke finnes eller er tom.
-    # En positiv returkode alene er ikke lenger en feil, siden det er forventet ved stopp.
+    # Error handling: Check if the video was created correctly
+    # When we stop with SIGINT, the return code is often not 0.
+    # We consider it an error ONLY if the file doesn't exist or is empty.
+    # A non-zero return code alone is no longer an error, as it's expected on stop.
     if not video_exists or video_size == 0:
-        print(f"Opptak feilet eller resulterte i en tom fil. Kode: {return_code}")
-        if video_exists: os.remove(dest_video) # Slett tom/korrupt fil
-        RECORDING = False # Sett til false før vi avslutter tråden
+        print(f"Recording failed or resulted in an empty file. Code: {return_code}")
+        if video_exists: os.remove(dest_video) # Delete empty/corrupt file
+        RECORDING = False # Set to false before exiting the thread
         RECORD_PROC = None
-        return # Avslutt tråden
+        return # Exit the thread
 
-    # Lag miniatyrbilde
+    # Create thumbnail
     make_splash(song, dest_thumbnail)
 
-    # Hent dato for spilleliste FØR opplastingstråden starter
+    # Get the date for the playlist BEFORE starting the upload thread
     script_dir = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(script_dir, COLORS_PATH), 'r') as f:
         color_data = json.load(f)
         playlist_date_str = color_data.get("last_updated", time.strftime("%Y-%m-%d"))
 
-    # Start opplasting i en egen tråd for å ikke blokkere
-    # Legg til i status-ordboken før tråden starter
-    UPLOAD_STATUS[dest_video] = {'title': song, 'status': 'Venter...'}
+    # Start the upload in a separate thread to avoid blocking
+    # Add to the status dictionary before the thread starts
+    UPLOAD_STATUS[dest_video] = {'title': song, 'status': 'Waiting...'}
     upload_thread = threading.Thread(target=upload_to_youtube, args=(dest_video, dest_thumbnail, song, playlist_date_str))
     upload_thread.start()
 
-    # Først NÅ er vi helt ferdige.
+    # Only NOW are we completely finished.
     RECORDING = False
     CURRENT_SONG = None
     RECORD_PROC = None
@@ -370,15 +368,15 @@ def songs():
         songs = json.load(f)
     songs.sort(key=lambda s: s["number"])
 
-    # Standardiser dataen før den sendes til klienten
-    # Dette gjør frontend-koden enklere og mer robust.
+    # Standardize the data before sending it to the client
+    # This makes the frontend code simpler and more robust.
     processed_songs = []
     for song in songs:
         processed_songs.append({
             "number": song["number"],
-            "title": song["name"], # Bruk "name" som kilde for "title"
-            "filename": f"{song['number']:02d}-{song['name'].replace(' ', '_')}.txt", # Lag et filnavn
-            "active": song.get("active", False) # Send med active-status
+            "title": song["name"], # Use "name" as the source for "title"
+            "filename": f"{song['number']:02d}-{song['name'].replace(' ', '_')}.txt", # Create a filename
+            "active": song.get("active", False) # Send the active status
         })
     return jsonify(processed_songs)
 
@@ -389,7 +387,7 @@ def start():
         return jsonify({"status": "already recording"})
     data = request.get_json()
     filename = data.get("filename")
-    title = data.get("title", filename) # Bruk filename som fallback
+    title = data.get("title", filename) # Use filename as a fallback
     CURRENT_SONG = title
     t = threading.Thread(target=record_video, args=(title,))
     t.start()
@@ -399,8 +397,8 @@ def start():
 def stop():
     global RECORD_PROC, RECORDING, CURRENT_SONG
     if RECORD_PROC and RECORDING:
-        # Bruk os.killpg for å sende signalet til hele prosessgruppen.
-        # Dette er en mer robust måte å terminere prosessen på.
+        # Use os.killpg to send the signal to the entire process group.
+        # This is a more robust way to terminate the process.
         os.killpg(os.getpgid(RECORD_PROC.pid), signal.SIGINT)
         return jsonify({"status": "stopped"})
     return jsonify({"status": "not recording"})
@@ -414,12 +412,12 @@ def status():
 
 @app.route("/upload_errors")
 def upload_errors():
-    """Returnerer en liste over opplastingsfeil."""
+    """Returns a list of upload errors."""
     return jsonify(UPLOAD_ERRORS)
 
 @app.route("/clear_error", methods=["POST"])
 def clear_error():
-    """Fjerner en spesifikk feilmelding fra listen."""
+    """Removes a specific error message from the list."""
     data = request.get_json()
     error_index = data.get("index")
     if error_index is not None and 0 <= error_index < len(UPLOAD_ERRORS):
@@ -428,11 +426,11 @@ def clear_error():
 
 @app.route("/upload_status")
 def get_upload_status():
-    """Returnerer en liste over pågående opplastinger og aktivt opptak."""
+    """Returns a list of ongoing uploads and the active recording."""
     statuses = []
-    # Legg til aktivt opptak først i listen hvis det finnes
+    # Add the active recording to the top of the list if it exists
     if RECORDING and CURRENT_SONG:
-        statuses.append({'title': CURRENT_SONG, 'status': 'Tar opp...'})
+        statuses.append({'title': CURRENT_SONG, 'status': 'Recording...'})
     statuses.extend(list(UPLOAD_STATUS.values()))
     return jsonify(statuses)
 
@@ -442,9 +440,9 @@ def static_files(path):
 
 @app.route("/reboot", methods=["POST"])
 def reboot():
-    """Starter Raspberry Pi på nytt."""
-    print("Mottok forespørsel om omstart...")
-    # Kjører kommandoen i en egen tråd for å la serveren svare før den restarter.
+    """Reboots the Raspberry Pi."""
+    print("Received reboot request...")
+    # Run the command in a separate thread to allow the server to respond before it restarts.
     def do_reboot():
         time.sleep(1)
         subprocess.run(["sudo", "reboot"])
@@ -453,9 +451,9 @@ def reboot():
 
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
-    """Slår av Raspberry Pi."""
-    print("Mottok forespørsel om avslutning...")
-    # Kjører kommandoen i en egen tråd for å la serveren svare før den slår seg av.
+    """Shuts down the Raspberry Pi."""
+    print("Received shutdown request...")
+    # Run the command in a separate thread to allow the server to respond before it shuts down.
     def do_shutdown():
         time.sleep(1)
         subprocess.run(["sudo", "shutdown", "-h", "now"])
@@ -478,9 +476,9 @@ def snapshot():
             "--width", "640",
             "--height", "360",
             "-t", "100",
-            "--mode", "2304:1296", # Velger 2x2 binned mode for full vidvinkel
+            "--mode", "2304:1296", # Selects 2x2 binned mode for full wide angle
             "--nopreview"
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # Omdirigerer output til null
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # Redirect output to null
         return send_from_directory("static", "snapshot.jpg")
     except Exception:
         return ("", 404)
@@ -488,7 +486,7 @@ def snapshot():
         snapshot_lock.release()
 
 def make_splash(songname, splash_path, width=1280, height=720):
-    # Hent dagens aktive farge
+    # Get today's active color
     try:
         with open(COLORS_PATH, 'r') as f:
             color_data = json.load(f)
@@ -496,23 +494,23 @@ def make_splash(songname, splash_path, width=1280, height=720):
             colors = color_data.get("colors", ["#000000"])
             background_color_hex = colors[active_index]
     except (FileNotFoundError, IndexError):
-        background_color_hex = "#000000" # Fallback til svart
+        background_color_hex = "#000000" # Fallback to black
 
-    # Bestem tekstfarge basert på bakgrunnens lysstyrke for best lesbarhet
-    # Konverter hex til RGB
+    # Determine text color based on background brightness for best readability
+    # Convert hex to RGB
     h = background_color_hex.lstrip('#')
     r, g, b = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-    # Beregn lysstyrke (luminance)
+    # Calculate luminance
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
     if luminance > 0.5:
-        text_color = "#000000" # Svart tekst på lys bakgrunn
+        text_color = "#000000" # Black text on light background
     else:
-        text_color = "#FFFFFF" # Hvit tekst på mørk bakgrunn
+        text_color = "#FFFFFF" # White text on dark background
 
     img = Image.new('RGB', (width, height), color=background_color_hex)
     draw = ImageDraw.Draw(img)
 
-    # Hent fonter
+    # Get fonts
     try:
         font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)
         font_date = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 40)
@@ -520,7 +518,7 @@ def make_splash(songname, splash_path, width=1280, height=720):
         font_title = ImageFont.load_default()
         font_date = ImageFont.load_default()
 
-    # Tekst for sangtittel
+    # Text for song title
     title_text = songname
     try:
         title_bbox = draw.textbbox((0, 0), title_text, font=font_title)
@@ -528,7 +526,7 @@ def make_splash(songname, splash_path, width=1280, height=720):
     except AttributeError:
         title_w, title_h = draw.textsize(title_text, font=font_title)
 
-    # Plasser sangtittel litt over midten
+    # Place song title slightly above the center
     draw.text(
         ((width - title_w) / 2, (height / 2) - title_h),
         title_text,
@@ -536,18 +534,12 @@ def make_splash(songname, splash_path, width=1280, height=720):
         fill=text_color
     )
 
-    # Formater og plasser dato og tid sentrert under tittelen
-    # Format: 5. oktober kl 21:45
+    # Format and place date and time centered below the title
+    # Format: 27 October at 21:45
     now = time.localtime()
-    norwegian_months = {
-        1: "januar", 2: "februar", 3: "mars", 4: "april",
-        5: "mai", 6: "juni", 7: "juli", 8: "august",
-        9: "september", 10: "oktober", 11: "november", 12: "desember"
-    }
-    # Hent norsk månedsnavn fra vår egen liste
-    month_name = norwegian_months.get(now.tm_mon, "")
-    # Bygg datostrengen manuelt for å sikre norsk format
-    date_text = f"{now.tm_mday}. {month_name} kl {now.tm_hour:02d}:{now.tm_min:02d}"
+    # Use strftime for locale-aware formatting, but set locale first if needed.
+    # For simplicity and consistency, we'll use a standard English format.
+    date_text = time.strftime("%d %B at %H:%M", now)
 
     try:
         date_bbox = draw.textbbox((0, 0), date_text, font=font_date)
@@ -556,7 +548,7 @@ def make_splash(songname, splash_path, width=1280, height=720):
         date_w, _ = draw.textsize(date_text, font=font_date)
 
     draw.text(
-        ((width - date_w) / 2, (height / 2) + 20), # Plasserer under midten
+        ((width - date_w) / 2, (height / 2) + 20), # Place it below the center
         date_text,
         font=font_date,
         fill=text_color
@@ -564,15 +556,15 @@ def make_splash(songname, splash_path, width=1280, height=720):
 
     img.save(splash_path, format="PNG")
 
-# --- Applikasjonsoppstart ---
-# Denne koden kjøres én gang når Gunicorn starter worker-prosessen.
-print("Applikasjon starter: Kjører engangsoppsett...")
+# --- Application Startup ---
+# This code runs once when Gunicorn starts the worker process.
+print("Application starting: Running one-time setup...")
 update_active_color()
-retry_failed_uploads() # Starter den periodiske sjekken for mislykkede opplastinger
+retry_failed_uploads() # Starts the periodic check for failed uploads
 
 if __name__ == "__main__":
     os.makedirs("static", exist_ok=True)
-    # Gjør server-loggen mindre "bråkete" ved å kun vise feilmeldinger
-    # Deaktiver standard-loggeren for å unngå en strøm av GET-requests i terminalen.
+    # Make the server log less "noisy" by only showing errors
+    # Disable the default logger to avoid a stream of GET requests in the terminal.
     logging.getLogger('werkzeug').disabled = True
     app.run(host="0.0.0.0", port=5000, debug=True)
