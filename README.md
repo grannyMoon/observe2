@@ -1,6 +1,6 @@
-# Observe - Automated Rehearsal Recorder
+# observe2 - Automated Rehearsal Recorder
 
-Observe is a Flask-based web application designed to run on a Raspberry Pi. It provides a simple, mobile-friendly web interface to record rehearsal takes using a Pi camera module. After a recording is stopped, it automatically generates a custom thumbnail and uploads the video to a designated, date-specific YouTube playlist.
+observe2 is a Flask-based web application designed to run on a Raspberry Pi. It provides a simple, mobile-friendly web interface to record rehearsal takes using a Pi camera module. After a recording is stopped, it automatically generates a custom thumbnail and uploads the video to a designated, date-specific YouTube playlist.
 
 ![Web Interface Screenshot](https://i.imgur.com/your-screenshot-url.png) <!-- It's a good idea to add a screenshot of your UI here -->
 
@@ -49,8 +49,8 @@ Clone this project into your home directory.
 
 ```bash
 cd ~
-git clone <your-repository-url> Observe
-cd Observe
+git clone <your-repository-url> observe2
+cd observe2
 ```
 
 ### Step 2.3: YouTube API Credentials
@@ -100,7 +100,7 @@ This file manages the background colors used for the video thumbnails. The appli
 You can run the app directly for testing purposes. The web interface will be available at `http://<your-pi-ip-address>:5000`.
 
 ```bash
-python observe.py
+python app.py
 ```
 
 ### Production Mode (Recommended)
